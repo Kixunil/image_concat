@@ -240,6 +240,12 @@ enum Parser {
 	SecondNumber(InclusiveRangeU32),
 }
 
+impl Default for Parser {
+    fn default() -> Parser {
+        Parser::new()
+    }
+}
+
 impl Parser {
 	/// Constructs new empty Parser
 	fn new() -> Parser {
