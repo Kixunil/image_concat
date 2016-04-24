@@ -1,6 +1,4 @@
 #![feature(zero_one)]
-#![feature(plugin)]
-#![plugin(clippy)]
 
 extern crate image;
 extern crate num_traits;
