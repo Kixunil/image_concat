@@ -276,9 +276,9 @@ impl Parser {
 	/// Finalizes parsing
 	fn finish(self, parsed: &mut ParsedInput) {
 		match self {
-			Parser::Str(s)          => parsed.push(InputPart::String(s)),
-			Parser::SecondNumber(r) => parsed.push(InputPart::Range(r)),
-			_               => panic!("Syntax error: unfinished range"),
+			Parser::Str(s) => parsed.push(InputPart::String(s)),
+			Parser::Empty  => {},
+			_              => panic!("Syntax error: unfinished range"),
 		}
 	}
 
