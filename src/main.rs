@@ -13,6 +13,7 @@ use std::ops::AddAssign;
 use num_traits::cast::ToPrimitive;
 use std::num::One;
 use std::env;
+use std::ops::Deref;
 
 // ==================== Pixels ====================
 
@@ -156,6 +157,8 @@ fn line_match_score<'a, P>(line1: &'a PixelLine<Pixel=P>, line2: &'a PixelLine<P
 // ==================== Arg parsing ====================
 
 /// Like `std::ops::Range`, but end is inclusive
+#[derive(Debug)]
+#[derive(Clone)]
 struct InclusiveRange<T>  where T: AddAssign + PartialOrd + One + Copy {
 	begin: T,
 	end: T,
@@ -297,6 +300,171 @@ impl Parser {
 	}
 }
 
+/// Vec guaranteed to be sorted (newtype pattern)
+struct SortedVec<T>(Vec<T>) where T: Ord;
+
+impl<T> SortedVec<T> where T: Ord {
+	/// Creates new `SortedVec` from unsorted `Vec`
+	fn new(mut vec: Vec<T>) -> SortedVec<T> {
+		vec.sort();
+		SortedVec::<T>(vec)
+	}
+
+	/// Gives up sorted property to allow mutations.
+	fn to_vec(self) -> Vec<T> {
+		self.0
+	}
+
+	//Allow some safe mutations
+	fn remove(&mut self, index: usize) -> T {
+		self.0.remove(index)
+	}
+
+	fn pop(&mut self) -> Option<T> {
+		 self.0.pop()
+	}
+
+	fn dedup(&mut self) {
+		self.0.dedup()
+	}
+}
+
+impl<T> Deref for SortedVec<T> where T: Ord {
+	type Target = Vec<T>;
+
+	// Only immutable deref provided, so no changes are allowed,
+	// which means nothing can break sorted guarantee.
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+#[derive(Debug)]
+#[derive(Clone)]
+enum StrDiff {
+	Same(usize),
+	Diff(usize),
+}
+
+type StrDiffs = Vec<StrDiff>;
+
+/// Represents state of analysis of different numbers
+enum AnalyzerState {
+    Empty,
+    SamePartWithoutDigit(usize),
+    SamePartWithDigit(usize, usize),
+    DifferentPart(usize),
+}
+
+impl SortedVec<String> {
+	fn analyze_different_numbers(& self) -> Vec<StrDiffs> {
+		let mut result = Vec::<StrDiffs>::new();
+		let mut iter = (*self).iter();
+		let mut last = if let Some(s) = iter.next() {
+			s
+		} else {
+			return result
+		};
+
+		for str in iter {
+			if last.len() != str.len() {
+				panic!("File names are not of same length");
+			}
+
+            let mut tmp_res = StrDiffs::new();
+            let mut byte_index = 0usize;
+            let mut state = AnalyzerState::Empty;
+            let striter = last.chars().zip(str.chars());
+
+			for (c1, c2) in striter {
+                state = match state {
+                    AnalyzerState::Empty => {
+                        if c1.is_digit(10) && c2.is_digit(10) {
+                            if c1 == c2 {
+                                AnalyzerState::SamePartWithDigit(byte_index, byte_index)
+                            } else {
+                                AnalyzerState::DifferentPart(byte_index)
+                            }
+                        } else {
+                            if c1 != c2 {
+                                panic!("Strings differ in something that is not digit");
+                            } 
+
+                            AnalyzerState::SamePartWithoutDigit(byte_index)
+                        }
+                    },
+                    AnalyzerState::SamePartWithoutDigit(begin) => {
+                        if c1.is_digit(10) && c2.is_digit(10) {
+                            if c1 == c2 {
+                                AnalyzerState::SamePartWithDigit(begin, byte_index)
+                            } else {
+                                tmp_res.push(StrDiff::Same(byte_index - begin));
+                                AnalyzerState::DifferentPart(byte_index)
+                            }
+                        } else {
+                            if c1 != c2 {
+                                panic!("Strings differ in something that is not digit");
+                            } 
+
+                            AnalyzerState::SamePartWithoutDigit(begin)
+                        }
+                    },
+                    AnalyzerState::SamePartWithDigit(begin, first_digit) => {
+                        if c1.is_digit(10) && c2.is_digit(10) {
+                            if c1 == c2 {
+                                AnalyzerState::SamePartWithDigit(begin, first_digit)
+                            } else {
+                                if begin != first_digit {
+                                    tmp_res.push(StrDiff::Same(first_digit - begin));
+                                }
+
+                                AnalyzerState::DifferentPart(first_digit)
+                            }
+                        } else {
+                            if c1 != c2 {
+                                panic!("Strings differ in something that is not digit");
+                            }
+
+                            AnalyzerState::SamePartWithoutDigit(begin)
+                        }
+                    },
+                    AnalyzerState::DifferentPart(first_digit) => {
+                        if c1.is_digit(10) && c2.is_digit(10) {
+                            AnalyzerState::DifferentPart(first_digit)
+                        } else {
+                            if c1 != c2 {
+                                panic!("Strings differ in something that is not digit");
+                            }
+
+                            tmp_res.push(StrDiff::Diff(byte_index - first_digit));
+                            AnalyzerState::SamePartWithoutDigit(byte_index)
+                        }
+                    }
+                };
+                byte_index += c1.len_utf8();
+            }
+
+            match state {
+                    AnalyzerState::Empty => {},
+                    AnalyzerState::SamePartWithoutDigit(begin) => {
+                        tmp_res.push(StrDiff::Same(byte_index - begin));
+                    },
+                    AnalyzerState::SamePartWithDigit(begin, _) => {
+                        tmp_res.push(StrDiff::Same(byte_index - begin));
+                    },
+                    AnalyzerState::DifferentPart(first_digit) => {
+                        tmp_res.push(StrDiff::Diff(byte_index - first_digit));
+                    },
+            }
+
+			result.push(tmp_res);
+			last = str;
+		}
+
+		result
+	}
+}
+
 // ==================== Program logic ====================
 
 /// Specifies how images should be placed
@@ -341,11 +509,211 @@ fn detect_tile_size_and_transposition(path1: &str, path2: &str) -> (u32, u32, Tr
 	(img1.width(), img1.height(), transposition)
 }
 
-fn main() {
-	let mut args = env::args();
+struct InputPattern {
+	prefix: String,
+	first_range: InclusiveRangeU32,
+	separator: String,
+	second_range: InclusiveRangeU32,
+	suffix: String,
+}
 
-	args.next();
+fn consume_strdiff_iter_upto_len<'a, T>(max_len: usize, input_iter: T, res: &mut StrDiffs) where T: IntoIterator<Item=&'a StrDiff> {
+    let mut iter = input_iter.into_iter();
+    let mut pushed_len = 0;
+    while pushed_len < max_len {
+        let item = iter.next().unwrap();
+        res.push(item.clone());
+        pushed_len += match *item {
+            StrDiff::Same(l) => l,
+            StrDiff::Diff(l) => l,
+        };
+    }
+}
 
+enum MaybeOwnedStrDiffs<'a> {
+    Owned(StrDiffs),
+    Borrowed(&'a StrDiffs),
+}
+
+impl<'a> Deref for MaybeOwnedStrDiffs<'a> {
+    type Target = StrDiffs;
+
+    fn deref(&self) -> &Self::Target {
+        match *self {
+            MaybeOwnedStrDiffs::Owned(ref owned) => owned,
+            MaybeOwnedStrDiffs::Borrowed(borrowed) => borrowed,
+        }
+    }
+}
+
+fn collapse_diff_patterns(patterns: &Vec<StrDiffs>) -> StrDiffs {
+    let mut iter = patterns.iter();
+    let mut res = MaybeOwnedStrDiffs::Borrowed(iter.next().unwrap());
+
+    for pattern in iter {
+        if pattern.len() != res.len() {
+            let mut tmp = StrDiffs::new();
+            {
+                let mut pat_iter = res.iter();
+                let mut cur_iter = pattern.iter();
+                loop {
+                    if let Some(pat) = pat_iter.next() {
+                        if let Some(cur) = cur_iter.next() {
+                            let pat_len = match *pat {
+                                StrDiff::Same(l) => l,
+                                StrDiff::Diff(l) => l,
+                            };
+                            let cur_len = match *cur {
+                                StrDiff::Same(l) => l,
+                                StrDiff::Diff(l) => l,
+                            };
+
+                            if pat_len > cur_len {
+                                tmp.push(if let StrDiff::Same(_) = *cur { StrDiff::Same(cur_len) } else { StrDiff::Diff(cur_len) });
+                                consume_strdiff_iter_upto_len(pat_len - cur_len, &mut cur_iter, &mut tmp);
+                            } else {
+                                tmp.push(if let StrDiff::Same(_) = *pat { StrDiff::Same(pat_len) } else { StrDiff::Diff(pat_len) });
+                                consume_strdiff_iter_upto_len(cur_len - pat_len, &mut pat_iter, &mut tmp);
+                            }
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            res = MaybeOwnedStrDiffs::Owned(tmp);
+        }
+    }
+
+    match res {
+        MaybeOwnedStrDiffs::Owned(owned) => owned,
+        MaybeOwnedStrDiffs::Borrowed(borrowed) => borrowed.clone(),
+    }
+}
+
+fn parse_ranges(pattern: &StrDiffs, path: &str) -> Vec<InclusiveRangeU32> {
+    let mut res = Vec::<InclusiveRangeU32>::new();
+    let mut pos = 0usize;
+
+    for str_diff in pattern {
+        pos += match *str_diff {
+            StrDiff::Same(same) => {
+                same
+            },
+            StrDiff::Diff(different) => {
+                let ref slice = path[pos..pos + different];
+                let number = slice.parse::<u32>().unwrap();
+                //let number = path[pos..pos + different].parse::<u32>().unwrap();
+                res.push(InclusiveRangeU32 { begin: number, end: number });
+                different
+            },
+        }
+    }
+
+    res
+}
+
+fn update_ranges(pattern: &StrDiffs, path: &str, ranges: &mut Vec<InclusiveRangeU32>) {
+    let mut iter = ranges.iter_mut();
+    let mut pos = 0usize;
+
+    for str_diff in pattern {
+        pos += match *str_diff {
+            StrDiff::Same(same) => {
+                same
+            },
+            StrDiff::Diff(different) => {
+                let ref slice = path[pos..pos + different];
+                let number = slice.parse::<u32>().unwrap();
+                let mut range = iter.next().unwrap();
+
+                if number < range.begin { range.begin = number; }
+                if number > range.end { range.end = number; }
+
+                different
+            },
+        }
+    }
+}
+
+fn parse_multi_arg(all_args: env::Args) -> (InputPattern, String) {
+	let mut args = all_args.collect::<Vec<String>>();
+	let last = args.pop().unwrap();
+
+	let sorted_args = SortedVec::<String>::new(args);
+
+	let differences = sorted_args.analyze_different_numbers();
+
+    let collapsed_pattern = collapse_diff_patterns(&differences);
+    println!("Collapsed: {:#?}", collapsed_pattern);
+
+    let mut arg_iter = sorted_args.iter();
+    let mut ranges = parse_ranges(&collapsed_pattern, &arg_iter.next().unwrap());
+
+    for arg in arg_iter {
+        update_ranges(&collapsed_pattern, &arg, &mut ranges);
+    }
+    println!("Ranges: {:#?}", ranges);
+
+    if ranges.len() != 2 {
+        panic!("Can not understand file names - they should have two differing numbers in their paths");
+    }
+
+    let arg0 = &sorted_args[0];
+
+    let mut range_iter = ranges.iter();
+    let mut pattern_iter = collapsed_pattern.iter();
+    let mut pos = 0usize;
+
+    let (prefix, first_range) = {
+        match *pattern_iter.next().unwrap() {
+            StrDiff::Same(l) => {
+                let pref = &arg0[pos..pos + l];
+                pos += l;
+                if let StrDiff::Diff(d) = *pattern_iter.next().unwrap() {
+                    pos += d;
+                } else {
+                    panic!("This error can never occur");
+                }
+
+                (pref, range_iter.next().unwrap().clone())
+            },
+            StrDiff::Diff(d) => {
+                pos += d;
+                ("", range_iter.next().unwrap().clone())
+            },
+        }
+    };
+
+    let sep_len = if let StrDiff::Same(l) = *pattern_iter.next().unwrap() { l } else { panic!("This error can never occur") };
+    let separator = &arg0[pos..pos + sep_len];
+    pos += sep_len;
+    let second_range = (*range_iter.next().unwrap()).clone();
+    pos += if let StrDiff::Diff(l) = *pattern_iter.next().unwrap() { l } else { panic!("This error can never occur") };
+    let suffix = if let Some(last) = pattern_iter.next() {
+        let suff_len = if let StrDiff::Same(l) = *last { l } else { panic!("This error can never occur") };
+        &arg0[pos..pos + suff_len]
+    } else {
+        ""
+    };
+
+
+    (
+        InputPattern {
+            prefix: prefix.to_string(),
+            first_range: first_range,
+            separator: separator.to_string(),
+            second_range: second_range,
+            suffix: suffix.to_string(),
+        },
+        last
+    )
+}
+
+fn parse_two_arg(mut args: env::Args) -> (InputPattern, String) {
 	let input = args.next().expect("Usage: image_concat INPUT_IMAGE_PATTERN OUTPUT_IMAGE");
 	let result_path = args.next().expect("Usage: image_concat INPUT_IMAGE_PATTERN OUTPUT_IMAGE");
 	let mut parsed_input = Parser::parse_input(&input);
@@ -362,6 +730,31 @@ fn main() {
 	let separator = parsed_input.pop().unwrap().take_mandatory_string();
 	let first_range = parsed_input.pop().unwrap().take_mandatory_range();
 	let prefix = parsed_input.pop().map_or_else(String::new, InputPart::take_mandatory_string);
+
+	(
+		InputPattern {
+			prefix: prefix,
+			first_range: first_range,
+			separator: separator,
+			second_range: second_range,
+			suffix: suffix,
+		},
+		result_path
+	)
+}
+
+fn main() {
+	let mut args = env::args();
+
+	args.next();
+
+	let (pattern, result_path) = if args.len() > 2 {
+		parse_multi_arg(args)
+	} else {
+		parse_two_arg(args)
+	};
+
+	let InputPattern { prefix, first_range, separator, second_range, suffix} = pattern;
 
 	let corner_image_filename = format!("{}{}{}{}{}", prefix, first_range.begin, separator, second_range.begin, suffix);
 	let other_image_filename = format!("{}{}{}{}{}", prefix, first_range.begin + 1, separator, second_range.begin, suffix);
