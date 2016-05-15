@@ -27,6 +27,9 @@ trait PixelLine {
 
 	/// Returns copy of the pixel at given position
 	fn get_pixel(&self, index: u32) -> Self::Pixel;
+
+    /// Whether the pixel line is empty
+    fn is_empty(&self) -> bool;
 }
 
 /// Represents one column of pixels in the image
@@ -62,9 +65,12 @@ impl<'a, I> PixelColumn<'a, I> where I: GenericImage {
 	///
 	fn new(img: &'a I, column: u32) -> PixelColumn<'a, I> {
 		// column must be in range
-		assert!(column < img.width());
-
-		PixelColumn {column_index: column, img: img}
+        let w = img.width();
+        if column >= w {
+            Self::new(img, w - 1)
+        } else {
+            PixelColumn {column_index: column, img: img}
+        }
 	}
 }
 
@@ -91,10 +97,17 @@ impl<'a, I> PixelLine for PixelColumn<'a, I> where I: GenericImage {
 	fn get_pixel(&self, index: u32) -> Self::Pixel {
 		self.img.get_pixel(self.column_index, index)
 	}
+
+    fn is_empty(&self) -> bool {
+        self.img.height() == 0
+    }
 }
 
 impl<'a, I> PixelLine for PixelRow<'a, I> where I: GenericImage {
 	type Pixel = I::Pixel;
+    fn is_empty(&self) -> bool {
+        self.img.width() == 0
+    }
 
 	fn len(&self) -> u32 {
 		self.img.width()
@@ -228,6 +241,12 @@ enum Parser {
 	FirstDot(u32),
 	SecondDot(u32),
 	SecondNumber(InclusiveRangeU32),
+}
+
+impl Default for Parser {
+    fn default() -> Parser {
+        Parser::new()
+    }
 }
 
 impl Parser {
